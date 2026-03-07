@@ -1,0 +1,7 @@
+[display]
+# Number of items shown by `doterm` (no flags)
+max_items = 5
+
+[storage]
+# Path to the SQLite database
+db_path = ~/doterm.sqlite
