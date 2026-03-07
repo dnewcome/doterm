@@ -22,6 +22,7 @@ def init_db(db_path):
         CREATE TABLE IF NOT EXISTS items (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             text         TEXT NOT NULL,
+            note         TEXT,
             project      TEXT,
             status       TEXT DEFAULT 'pending',
             priority     INTEGER DEFAULT 0,
@@ -30,20 +31,38 @@ def init_db(db_path):
             due_date     DATE
         );
     ''')
+    # Migrate existing databases that predate the note column
+    existing = {row[1] for row in conn.execute('PRAGMA table_info(items)')}
+    if 'note' not in existing:
+        conn.execute('ALTER TABLE items ADD COLUMN note TEXT')
     conn.commit()
     conn.close()
 
 
-def add_item(db_path, text, project=None, priority=0):
+def add_item(db_path, text, project=None, priority=0, note=None):
     conn = get_connection(db_path)
     cursor = conn.execute(
-        'INSERT INTO items (text, project, priority) VALUES (?, ?, ?)',
-        (text, project, priority),
+        'INSERT INTO items (text, note, project, priority) VALUES (?, ?, ?, ?)',
+        (text, note, project, priority),
     )
     item_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return item_id
+
+
+def update_note(db_path, item_id, note):
+    conn = get_connection(db_path)
+    conn.execute('UPDATE items SET note = ? WHERE id = ?', (note, item_id))
+    conn.commit()
+    conn.close()
+
+
+def get_item(db_path, item_id):
+    conn = get_connection(db_path)
+    row = conn.execute('SELECT * FROM items WHERE id = ?', (item_id,)).fetchone()
+    conn.close()
+    return row
 
 
 def get_items(db_path, status='pending', limit=None, project=None, today_only=False):

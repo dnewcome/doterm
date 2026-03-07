@@ -1,4 +1,5 @@
 import curses
+import textwrap
 from . import db as database
 
 
@@ -102,7 +103,8 @@ def _run(stdscr, db_path, project_filter):
             done = item['status'] == 'done'
             check = '[x]' if done else '[ ]'
             proj = f' ({item["project"]})' if item['project'] and not active_project else ''
-            line = f' {check}{proj} {item["text"]}'
+            note_flag = ' »' if item['note'] else ''
+            line = f' {check}{proj} {item["text"]}{note_flag}'
             line = line[:w - 1]
 
             if is_selected:
@@ -128,7 +130,7 @@ def _run(stdscr, db_path, project_filter):
                 stdscr.addstr(h - 2, 0, pos, curses.color_pair(4))
 
         # --- Help bar ---
-        help_text = ' j/k:nav  space:done  a:add  e:edit  p:project  D:delete  s:show-done  q:quit'
+        help_text = ' j/k:nav  space:done  l:note  a:add  e:edit  p:project  D:delete  s:show-done  q:quit'
         stdscr.addstr(h - 1, 0, help_text[:w - 1], curses.color_pair(4))
 
         stdscr.refresh()
@@ -206,5 +208,59 @@ def _run(stdscr, db_path, project_filter):
             items = load_items()
             current = 0
 
+        elif key == ord('l'):
+            if items:
+                _detail_view(stdscr, db_path, items[current])
+                items = load_items()
+
         elif key == ord('r'):
             items = load_items()
+
+
+def _detail_view(stdscr, db_path, item):
+    """Drill-in note view for a single item. h returns to list."""
+    while True:
+        stdscr.clear()
+        h, w = stdscr.getmaxyx()
+
+        # Reload item so edits are reflected immediately
+        from . import db as database
+        fresh = database.get_item(db_path, item['id'])
+        if fresh is None:
+            break
+        item = fresh
+
+        # Header: item title
+        done = item['status'] == 'done'
+        check = '[x]' if done else '[ ]'
+        proj = f' [{item["project"]}]' if item['project'] else ''
+        title = f' {check}{proj} {item["text"]}'
+        stdscr.addstr(0, 0, title[:w - 1], curses.color_pair(4) | curses.A_BOLD)
+        stdscr.addstr(1, 0, '─' * (w - 1), curses.color_pair(4))
+
+        # Note body (word-wrapped)
+        note = item['note'] or ''
+        if note:
+            row = 2
+            for para in note.splitlines() or ['']:
+                for line in (textwrap.wrap(para, w - 2) or ['']):
+                    if row >= h - 2:
+                        break
+                    stdscr.addstr(row, 1, line, curses.color_pair(3))
+                    row += 1
+        else:
+            stdscr.addstr(3, 1, '(no note)  press e to add one', curses.color_pair(3))
+
+        # Help bar
+        help_text = ' h:back  e:edit note  q:quit'
+        stdscr.addstr(h - 1, 0, help_text[:w - 1], curses.color_pair(4))
+
+        stdscr.refresh()
+        key = stdscr.getch()
+
+        if key in (ord('h'), ord('q'), 27):
+            break
+
+        elif key == ord('e'):
+            new_note = _prompt(stdscr, h, w, 'Note: ', item['note'] or '')
+            database.update_note(db_path, item['id'], new_note or None)

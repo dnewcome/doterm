@@ -5,10 +5,14 @@ from .config import load_config, get_db_path, get_max_items
 from .tui import run_tui
 
 
-def _fmt(item, index):
+def _fmt(item, index, show_detail=False):
     status = 'x' if item['status'] == 'done' else ' '
     project = f'({item["project"]}) ' if item['project'] else ''
-    return f'  {index:3}. [{status}] {project}{item["text"]}'
+    note_flag = ' »' if item['note'] else ''
+    line = f'  {index:3}. [{status}] {project}{item["text"]}{note_flag}'
+    if show_detail and item['note']:
+        line += f'\n         {item["note"]}'
+    return line
 
 
 def main():
@@ -28,6 +32,8 @@ def main():
                         help='Show only items created today')
     parser.add_argument('--done', action='store_true',
                         help='Show completed items')
+    parser.add_argument('-d', '--detail', nargs='?', const=True, metavar='TEXT',
+                        help='With -m: attach a note. Alone: show notes inline when listing.')
     parser.add_argument('-n', metavar='N', type=int,
                         help='Override number of items to show')
 
@@ -39,9 +45,11 @@ def main():
 
     # Add item
     if args.message:
-        item_id = database.add_item(db_path, args.message, project=args.project)
+        note = args.detail if isinstance(args.detail, str) else None
+        item_id = database.add_item(db_path, args.message, project=args.project, note=note)
         project_tag = f' [{args.project}]' if args.project else ''
-        print(f'Added #{item_id}{project_tag}: {args.message}')
+        detail_tag = ' (with note)' if note else ''
+        print(f'Added #{item_id}{project_tag}{detail_tag}: {args.message}')
         return
 
     # Interactive mode
@@ -71,9 +79,12 @@ def main():
     total = database.count_items(db_path, status=status, project=args.project)
     shown = len(items)
 
+    # -d alone (no value) → args.detail is True (the const); show notes inline
+    show_notes = args.detail is not None
+
     print()
     for i, item in enumerate(items, 1):
-        print(_fmt(item, i))
+        print(_fmt(item, i, show_detail=show_notes))
     print()
 
     if limit is not None and total > shown:
