@@ -54,7 +54,7 @@ def _run(stdscr, db_path, project_filter):
     curses.init_pair(5, curses.COLOR_RED, -1)     # deleted/error
     curses.init_pair(6, curses.COLOR_YELLOW, -1)  # message
 
-    show_done = False
+    show_done = True
     current = 0
     offset = 0
     message = ''
@@ -87,8 +87,8 @@ def _run(stdscr, db_path, project_filter):
         title = ' doterm'
         if active_project:
             title += f' [{active_project}]'
-        if show_done:
-            title += ' (all)'
+        if not show_done:
+            title += ' (pending only)'
         title_right = f'{len(items)} items '
         stdscr.addstr(0, 0, title, curses.color_pair(4) | curses.A_BOLD)
         if len(title_right) < w:
@@ -130,7 +130,8 @@ def _run(stdscr, db_path, project_filter):
                 stdscr.addstr(h - 2, 0, pos, curses.color_pair(4))
 
         # --- Help bar ---
-        help_text = ' j/k:nav  space:done  l:note  a:add  e:edit  p:project  D:delete  s:show-done  q:quit'
+        done_label = 'hide-done' if show_done else 'show-done'
+        help_text = f' j/k:nav  J/K:move  space:done  l:note  a:add  e:edit  p:project  D:delete  s:{done_label}  q:quit'
         stdscr.addstr(h - 1, 0, help_text[:w - 1], curses.color_pair(4))
 
         stdscr.refresh()
@@ -145,6 +146,18 @@ def _run(stdscr, db_path, project_filter):
 
         elif key in (ord('k'), curses.KEY_UP):
             if current > 0:
+                current -= 1
+
+        elif key == ord('J'):  # Shift-J: move item down
+            if items and current < len(items) - 1:
+                database.swap_positions(db_path, items[current]['id'], items[current + 1]['id'])
+                items = load_items()
+                current += 1
+
+        elif key == ord('K'):  # Shift-K: move item up
+            if items and current > 0:
+                database.swap_positions(db_path, items[current]['id'], items[current - 1]['id'])
+                items = load_items()
                 current -= 1
 
         elif key == ord('g'):
@@ -206,7 +219,7 @@ def _run(stdscr, db_path, project_filter):
         elif key == ord('s'):
             show_done = not show_done
             items = load_items()
-            current = 0
+            current = min(current, max(0, len(items) - 1))
 
         elif key == ord('l'):
             if items:

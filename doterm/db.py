@@ -26,24 +26,30 @@ def init_db(db_path):
             project      TEXT,
             status       TEXT DEFAULT 'pending',
             priority     INTEGER DEFAULT 0,
+            position     INTEGER,
             created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP,
             due_date     DATE
         );
     ''')
-    # Migrate existing databases that predate the note column
+    # Migrations for databases predating newer columns
     existing = {row[1] for row in conn.execute('PRAGMA table_info(items)')}
     if 'note' not in existing:
         conn.execute('ALTER TABLE items ADD COLUMN note TEXT')
+    if 'position' not in existing:
+        conn.execute('ALTER TABLE items ADD COLUMN position INTEGER')
+    # Initialise position for any rows that don't have one yet
+    conn.execute('UPDATE items SET position = id WHERE position IS NULL')
     conn.commit()
     conn.close()
 
 
 def add_item(db_path, text, project=None, priority=0, note=None):
     conn = get_connection(db_path)
+    max_pos = conn.execute('SELECT COALESCE(MAX(position), 0) FROM items').fetchone()[0]
     cursor = conn.execute(
-        'INSERT INTO items (text, note, project, priority) VALUES (?, ?, ?, ?)',
-        (text, note, project, priority),
+        'INSERT INTO items (text, note, project, priority, position) VALUES (?, ?, ?, ?, ?)',
+        (text, note, project, priority, max_pos + 1),
     )
     item_id = cursor.lastrowid
     conn.commit()
@@ -79,7 +85,7 @@ def get_items(db_path, status='pending', limit=None, project=None, today_only=Fa
         query += ' AND DATE(created_at) = ?'
         params.append(today)
 
-    query += ' ORDER BY priority DESC, created_at ASC'
+    query += ' ORDER BY position ASC, id ASC'
 
     if limit is not None:
         query += ' LIMIT ?'
@@ -91,17 +97,28 @@ def get_items(db_path, status='pending', limit=None, project=None, today_only=Fa
 
 
 def get_all_items(db_path, project=None):
-    """Return pending + done items, pending first."""
+    """Return all items (pending + done) in position order."""
     conn = get_connection(db_path)
     query = 'SELECT * FROM items'
     params = []
     if project:
         query += ' WHERE project = ?'
         params.append(project)
-    query += ' ORDER BY status ASC, priority DESC, created_at ASC'
+    query += ' ORDER BY position ASC, id ASC'
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return rows
+
+
+def swap_positions(db_path, id_a, id_b):
+    """Swap the position values of two items."""
+    conn = get_connection(db_path)
+    pos_a = conn.execute('SELECT position FROM items WHERE id = ?', (id_a,)).fetchone()[0]
+    pos_b = conn.execute('SELECT position FROM items WHERE id = ?', (id_b,)).fetchone()[0]
+    conn.execute('UPDATE items SET position = ? WHERE id = ?', (pos_b, id_a))
+    conn.execute('UPDATE items SET position = ? WHERE id = ?', (pos_a, id_b))
+    conn.commit()
+    conn.close()
 
 
 def complete_item(db_path, item_id):

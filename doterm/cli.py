@@ -23,7 +23,7 @@ def main():
     parser.add_argument('-m', '--message', metavar='TEXT',
                         help='Add a new todo item')
     parser.add_argument('-a', '--all', action='store_true',
-                        help='Show all pending items (no limit)')
+                        help='Show all items including done (no limit)')
     parser.add_argument('-i', '--interactive', action='store_true',
                         help='Open interactive TUI')
     parser.add_argument('-p', '--project', metavar='NAME',
@@ -58,25 +58,32 @@ def main():
         return
 
     # List items
-    status = 'done' if args.done else 'pending'
-    limit = None if (args.all or args.done) else (args.n or get_max_items(config))
-
-    items = list(database.get_items(
-        db_path,
-        status=status,
-        limit=limit,
-        project=args.project,
-        today_only=args.today,
-    ))
+    if args.all:
+        items = list(database.get_all_items(db_path, project=args.project))
+        limit = None
+    elif args.done:
+        items = list(database.get_items(db_path, status='done', project=args.project))
+        limit = None
+    else:
+        limit = args.n or get_max_items(config)
+        items = list(database.get_items(
+            db_path,
+            status='pending',
+            limit=limit,
+            project=args.project,
+            today_only=args.today,
+        ))
 
     if not items:
         if args.done:
             print('No completed items.')
+        elif args.all:
+            print('No items.  Add one with:  doterm -m "your task"')
         else:
             print('No pending items.  Add one with:  doterm -m "your task"')
         return
 
-    total = database.count_items(db_path, status=status, project=args.project)
+    total = database.count_items(db_path, status='pending', project=args.project)
     shown = len(items)
 
     # -d alone (no value) → args.detail is True (the const); show notes inline
@@ -87,7 +94,7 @@ def main():
         print(_fmt(item, i, show_detail=show_notes))
     print()
 
-    if limit is not None and total > shown:
+    if not args.all and not args.done and limit is not None and total > shown:
         print(f'  ... {total - shown} more hidden  (use -a to show all, -i for TUI)')
         print()
 
