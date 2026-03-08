@@ -1,8 +1,70 @@
 import argparse
+import sqlite3
 import sys
 from . import db as database
 from .config import load_config, get_db_path, get_max_items
 from .tui import run_tui
+
+
+def _md_table(cursor):
+    """Render a cursor result as a markdown table. Returns empty string if no rows."""
+    if cursor.description is None:
+        return f'*{cursor.rowcount} row(s) affected*\n'
+
+    cols = [d[0] for d in cursor.description]
+    rows = [[str(v) if v is not None else '' for v in row] for row in cursor.fetchall()]
+
+    if not rows:
+        return '*no results*\n'
+
+    widths = [len(c) for c in cols]
+    for row in rows:
+        for i, v in enumerate(row):
+            widths[i] = max(widths[i], len(v))
+
+    def fmt_row(cells):
+        return '| ' + ' | '.join(c.ljust(widths[i]) for i, c in enumerate(cells)) + ' |'
+
+    lines = [
+        fmt_row(cols),
+        '| ' + ' | '.join('-' * w for w in widths) + ' |',
+    ]
+    for row in rows:
+        lines.append(fmt_row(row))
+    return '\n'.join(lines) + '\n'
+
+
+def _run_sql_report(db_path, sql):
+    """Execute one or more SQL statements from stdin and print a markdown report."""
+    conn = database.get_connection(db_path)
+    # Split blocks on blank lines; each block may start with -- comment as heading
+    blocks = [b.strip() for b in sql.split('\n\n') if b.strip()]
+    try:
+        for block in blocks:
+            lines = block.splitlines()
+            heading_lines = []
+            sql_lines = []
+            for line in lines:
+                if line.startswith('--') and not sql_lines:
+                    heading_lines.append(line.lstrip('- ').strip())
+                else:
+                    sql_lines.append(line)
+
+            heading = ' '.join(heading_lines)
+            statement = ' '.join(sql_lines).rstrip(';').strip()
+            if not statement:
+                continue
+
+            if heading:
+                print(f'## {heading}\n')
+
+            try:
+                cursor = conn.execute(statement)
+                print(_md_table(cursor))
+            except sqlite3.Error as e:
+                print(f'*Error: {e}*\n', file=sys.stderr)
+    finally:
+        conn.close()
 
 
 def _fmt(item, index, show_detail=False):
@@ -42,6 +104,13 @@ def main():
     config = load_config()
     db_path = get_db_path(config)
     database.init_db(db_path)
+
+    # SQL report mode: pipe SQL via stdin
+    if not sys.stdin.isatty():
+        sql = sys.stdin.read().strip()
+        if sql:
+            _run_sql_report(db_path, sql)
+        return
 
     # Add item
     if args.message:
